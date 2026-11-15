@@ -123,9 +123,9 @@ class PlaybackSession:
             self.ready[job.index] = ReadyBlock(job.prefix, job.signature, frames)
 
     def check_decode_deadline(self, index, now):
-        if index == self.next_index and now > self.deadline(index) + 1e-9:
-            if self.valid_ready(index) is None:
-                self.record_underrun(index, self.deadline(index))
+        late = index == self.next_index and now > self.deadline(index) + 1e-9
+        if late and self.valid_ready(index) is None:
+            self.record_underrun(index, self.deadline(index))
 
     def advance(self, now):
         """Freeze only completed, causally valid reconstructions at their PTS."""
