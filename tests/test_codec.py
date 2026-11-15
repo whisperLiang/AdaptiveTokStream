@@ -21,7 +21,10 @@ def backend():
     if not torch.cuda.is_available():
         pytest.skip("CUDA unavailable")
     return AdapTokBackend(
-        ROOT / "third_party/AdapTok", path, device="cuda:0", native_tokens_per_block=512
+        ROOT / "third_party/AdapTok",
+        path,
+        device=os.environ.get("ADAPTOK_DEVICE", "cuda:0"),
+        native_tokens_per_block=512,
     )
 
 
@@ -121,3 +124,28 @@ def test_mismatched_native_layout_rejected():
             ROOT / "artifacts/weights/AdapTok",
             native_tokens_per_block=256,
         )
+
+
+@pytest.mark.model
+def test_native_quantized_embedding_and_stream_mapping(backend, encoded):
+    import torch
+
+    frames, _, window = encoded
+    with torch.inference_mode():
+        native = backend.model.encode(frames.to(backend.device), with_latent_mask=False)
+        full_ids = native["bottleneck_rep"]
+        restored = backend.model.bottleneck.decode(full_ids)
+        torch.testing.assert_close(restored, native["encoded"], atol=2e-5, rtol=2e-5)
+        selected = full_ids.reshape(4, backend.native_tokens_per_block)[:, :256].cpu().numpy()
+        np.testing.assert_array_equal(selected, window.tokens)
+        budgets = [8, 32, 128, 256]
+        native_mask = torch.zeros(
+            (1, 4, backend.native_tokens_per_block), device=backend.device, dtype=torch.bool
+        )
+        stream_mask = np.zeros((4, 256), bool)
+        for g, k in enumerate(budgets):
+            native_mask[0, g, :k] = True
+            stream_mask[g, :k] = True
+        direct = backend.model.decode_with_mask(native["encoded"], native_mask.flatten(1))
+        received = backend.decode_tokens(window.tokens, stream_mask).frames
+        torch.testing.assert_close(direct, received, atol=2e-5, rtol=2e-5)

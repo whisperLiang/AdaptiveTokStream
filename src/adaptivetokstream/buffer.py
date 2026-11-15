@@ -56,14 +56,7 @@ class TokenBuffer:
     def prefix(self, window_id, block_id):
         return self.block(window_id, block_id).prefix
 
-    def append(self, packet: TokenPacket, now_us: int) -> AppendResult:
-        from .protocol import TokenPacker
-
-        packet.validate()
-        if packet.stream_id != self.stream_id or packet.model_id != self.model_id:
-            raise ValueError("Packet belongs to a different stream or model")
-        self.stats.received_bytes += packet.wire_bytes
-        self.stats.received_payload_bytes += len(packet.payload)
+    def _rejection(self, packet, now_us):
         if packet.window_id <= self.retired_through:
             return AppendResult("retired")
         block = self.block(packet.window_id, packet.block_id)
@@ -73,15 +66,18 @@ class TokenBuffer:
         if now_us > packet.deadline:
             self.stats.expired_packets += 1
             return AppendResult("expired", prefix=block.prefix)
-        values = TokenPacker.unpack_tokens(packet.payload, packet.token_count)
-        positions = range(packet.token_start, packet.token_start + packet.token_count)
+        return None
+
+    @staticmethod
+    def _validate_overlap(block, packet, positions, values):
         if block.pts is not None and block.pts != packet.frame_pts:
             raise ValueError("Conflicting block PTS")
         if any(block.ids[i] is not None and block.ids[i] != v for i, v in zip(positions, values)):
             raise ValueError("Conflicting overlapping token ID")
+
+    def _store(self, block, packet, positions, values):
         new = sum(block.ids[i] is None for i in positions)
-        duplicates = len(values) - new
-        self.stats.duplicate_payload_bytes += (13 * duplicates + 7) // 8
+        self.stats.duplicate_payload_bytes += (13 * (len(values) - new) + 7) // 8
         for i, v in zip(positions, values):
             block.ids[i] = v
         while block.prefix < 256 and block.ids[block.prefix] is not None:
@@ -94,6 +90,23 @@ class TokenBuffer:
         if not new:
             self.stats.duplicate_packets += 1
         return AppendResult("accepted" if new else "duplicate", new, block.prefix)
+
+    def append(self, packet: TokenPacket, now_us: int) -> AppendResult:
+        from .protocol import TokenPacker
+
+        packet.validate()
+        if packet.stream_id != self.stream_id or packet.model_id != self.model_id:
+            raise ValueError("Packet belongs to a different stream or model")
+        self.stats.received_bytes += packet.wire_bytes
+        self.stats.received_payload_bytes += len(packet.payload)
+        rejected = self._rejection(packet, now_us)
+        if rejected is not None:
+            return rejected
+        block = self.block(packet.window_id, packet.block_id)
+        values = TokenPacker.unpack_tokens(packet.payload, packet.token_count)
+        positions = range(packet.token_start, packet.token_start + packet.token_count)
+        self._validate_overlap(block, packet, positions, values)
+        return self._store(block, packet, positions, values)
 
     def snapshot(self, window_id, target_block):
         """Hide future groups; use immutable displayed prefixes for past groups."""

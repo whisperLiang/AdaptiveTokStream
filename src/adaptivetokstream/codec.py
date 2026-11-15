@@ -110,19 +110,7 @@ class AdapTokBackend:
 
     def decode_tokens(self, tokens, mask):
         torch = self.torch
-        tokens = np.asarray(tokens)
-        mask = np.asarray(mask)
-        if tokens.shape != (4, 256) or mask.shape != (4, 256) or mask.dtype != np.bool_:
-            raise ValueError("Expected [4,256] IDs and boolean group prefix mask")
-        if (
-            not np.issubdtype(tokens.dtype, np.integer)
-            or np.any(tokens < 0)
-            or np.any(tokens >= 8192)
-        ):
-            raise ValueError("Invalid codebook index")
-        # Prefix masks are a protocol invariant, including the zero prefix.
-        if np.any(np.diff(mask.astype(np.int8), axis=1) > 0):
-            raise ValueError("Each group must use a contiguous prefix")
+        tokens, mask = validate_token_arrays(tokens, mask)
         self.synchronize()
         if self.device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(self.device)
@@ -209,3 +197,16 @@ class ProgressiveVideoDecoder:
             raise ValueError("Cannot play a block before decode completes")
         self.buffer.finalize(window_id, block_id, prefix)
         self.decoded_prefixes.pop((window_id, block_id), None)
+
+
+def validate_token_arrays(tokens, mask):
+    tokens = np.asarray(tokens)
+    mask = np.asarray(mask)
+    if tokens.shape != (4, 256) or mask.shape != (4, 256) or mask.dtype != np.bool_:
+        raise ValueError("Expected [4,256] IDs and boolean group prefix mask")
+    if not np.issubdtype(tokens.dtype, np.integer) or np.any(tokens < 0) or np.any(tokens >= 8192):
+        raise ValueError("Invalid codebook index")
+    # Prefix masks are a protocol invariant, including the zero prefix.
+    if np.any(np.diff(mask.astype(np.int8), axis=1) > 0):
+        raise ValueError("Each group must use a contiguous prefix")
+    return tokens, mask

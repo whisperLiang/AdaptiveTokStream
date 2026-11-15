@@ -73,7 +73,7 @@ class Config:
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     seed: int = 42
 
-    def validate(self):
+    def _validate_codec(self):
         c = self.codec
         if (
             c.resolution,
@@ -87,15 +87,19 @@ class Config:
             )
         if tuple(c.budgets) != (8, 16, 32, 64, 128, 256):
             raise ValueError("Budgets must be [8,16,32,64,128,256]")
+
+    def _validate_playback(self):
         if self.streaming.mode != "vod" or self.streaming.min_tokens != 8:
             raise ValueError("Only pre-encoded VOD with 8-token base is supported")
         if (
             self.streaming.policy not in ("fixed", "greedy", "deadline_mpc")
-            or self.streaming.fixed_tokens not in c.budgets
+            or self.streaming.fixed_tokens not in self.codec.budgets
         ):
             raise ValueError("Unknown policy or fixed budget")
         if not 0 <= self.streaming.initial_buffer_seconds <= self.streaming.max_buffer_seconds:
             raise ValueError("Invalid playback buffer limits")
+
+    def _validate_network(self):
         if (
             self.streaming.max_buffer_seconds <= 0
             or self.network.bandwidth_mbps <= 0
@@ -108,18 +112,29 @@ class Config:
             or not 0 < self.network.ewma_alpha <= 1
         ):
             raise ValueError("Invalid network timing or estimator alpha")
+
+    def _validate_scheduler(self):
         if self.scheduler.horizon_blocks < 1 or self.scheduler.beam_width < 1:
             raise ValueError("Positive MPC horizon and beam width required")
         if self.scheduler.max_video_bytes is not None and self.scheduler.max_video_bytes < 1:
             raise ValueError("Byte cap must be positive")
+
+    def _validate_evaluation(self):
         if (
             self.evaluation.repeats < 1
             or self.evaluation.warmup < 0
-            or self.evaluation.history_budget not in c.budgets
+            or self.evaluation.history_budget not in self.codec.budgets
         ):
             raise ValueError("Invalid profiling settings")
         if tuple(self.evaluation.metrics) != ("psnr", "lpips", "dists"):
             raise ValueError("All three reference metrics are required")
+
+    def validate(self):
+        self._validate_codec()
+        self._validate_playback()
+        self._validate_network()
+        self._validate_scheduler()
+        self._validate_evaluation()
         return self
 
     def backend(self):

@@ -175,6 +175,42 @@ class DeadlineAwareMPC(TokenPolicy):
             + cfg.byte_penalty * bytes_used
         )
 
+    def _extend(self, node, j, block, k, state):
+        prefixes, net, decode, used, actions, times = node
+        content = self.config.scheduler.use_content_quality
+        if k <= prefixes[j] or self.rd.distortion(
+            block.index, prefixes[j], content
+        ) <= self.rd.distortion(block.index, k, content):
+            return None
+        size = self.size_function(block.index, prefixes[j], k)
+        if (
+            state.remaining_bytes is not None
+            and used + size + self.reserve_base_bytes(state) > state.remaining_bytes
+        ):
+            return None
+        end = net + size / max(state.estimated_bandwidth, 1e-9)
+        done = max(end + state.network_rtt / 2, decode) + self.decode_cost(block.index, k)
+        if done > block.deadline:
+            return None
+        pp = list(prefixes)
+        pp[j] = k
+        tt = list(times)
+        tt[j] = done
+        action = Action(block.index, prefixes[j], k, size, True)
+        return (tuple(pp), end, done, used + size, actions + (action,), tuple(tt))
+
+    def _expand(self, beam, blocks, state):
+        expanded = []
+        for node in beam:
+            for j, block in enumerate(blocks):
+                for k in BUDGETS:
+                    extension = self._extend(node, j, block, k, state)
+                    if extension is not None:
+                        score = self._score(blocks, extension[0], extension[5], extension[3], state)
+                        expanded.append((score, extension))
+        expanded.sort(key=lambda item: (item[0], item[1][3], item[1][0]))
+        return expanded[: self.config.scheduler.beam_width]
+
     def choose(self, state):
         base = self.base_action(state)
         if base is not None:
@@ -182,54 +218,19 @@ class DeadlineAwareMPC(TokenPolicy):
         blocks = self.horizon(state)
         if not blocks:
             return None
-        # Beam nodes: prefixes, network-free time, decoder-free time, bytes, actions,
-        # completion times. Every edge uses a real serialized packet size.
         initial = tuple(b.prefix for b in blocks)
         initial_times = tuple(state.now for _ in blocks)
         beam = [(initial, state.now, state.decoder_available_at, 0, (), initial_times)]
         best_score = self._score(blocks, initial, initial_times, 0, state)
         best = None
         for _ in range(min(3, len(blocks))):
-            expanded = []
-            for prefixes, net, decode, used, actions, times in beam:
-                for j, b in enumerate(blocks):
-                    for k in BUDGETS:
-                        if k <= prefixes[j]:
-                            continue
-                        gain = self.rd.distortion(
-                            b.index, prefixes[j], self.config.scheduler.use_content_quality
-                        ) - self.rd.distortion(
-                            b.index, k, self.config.scheduler.use_content_quality
-                        )
-                        if gain <= 0:
-                            continue
-                        size = self.size_function(b.index, prefixes[j], k)
-                        if (
-                            state.remaining_bytes is not None
-                            and used + size + self.reserve_base_bytes(state) > state.remaining_bytes
-                        ):
-                            continue
-                        end = net + size / max(state.estimated_bandwidth, 1e-9)
-                        done = max(end + state.network_rtt / 2, decode) + self.decode_cost(
-                            b.index, k
-                        )
-                        if done > b.deadline:
-                            continue
-                        pp = list(prefixes)
-                        pp[j] = k
-                        tt = list(times)
-                        tt[j] = done
-                        a = Action(b.index, prefixes[j], k, size, True)
-                        node = (tuple(pp), end, done, used + size, actions + (a,), tuple(tt))
-                        score = self._score(blocks, node[0], node[5], node[3], state)
-                        expanded.append((score, node))
-                        if score < best_score:
-                            best_score = score
-                            best = node[4][0]
+            expanded = self._expand(beam, blocks, state)
             if not expanded:
                 break
-            expanded.sort(key=lambda item: (item[0], item[1][3], item[1][0]))
-            beam = [node for _, node in expanded[: self.config.scheduler.beam_width]]
+            if expanded[0][0] < best_score:
+                best_score = expanded[0][0]
+                best = expanded[0][1][4][0]
+            beam = [node for _, node in expanded]
         return best
 
 

@@ -17,6 +17,11 @@ NO_EXPIRY = (1 << 64) - 1
 BASE = 1
 
 
+def _validate_unsigned(value, limit):
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value < limit:
+        raise ValueError("Invalid packet header value")
+
+
 class TokenPacker:
     @staticmethod
     def pack_tokens(token_ids) -> bytes:
@@ -64,11 +69,13 @@ class TokenPacket:
             (self.frame_pts, 2**64),
             (self.deadline, 2**64),
         )
-        if any(not isinstance(x, int) or isinstance(x, bool) or not 0 <= x < n for x, n in bounds):
-            raise ValueError("Invalid packet header value")
+        for value, limit in bounds:
+            _validate_unsigned(value, limit)
         if self.version != 1 or len(self.model_id) != 16 or self.flags not in (0, BASE):
             raise ValueError("Unsupported version, model ID, or flags")
-        if not (0 <= self.token_start < 256 and 1 <= self.token_count <= 256 - self.token_start):
+        _validate_unsigned(self.token_start, 256)
+        _validate_unsigned(self.token_count, 257)
+        if not 1 <= self.token_count <= 256 - self.token_start:
             raise ValueError("Invalid token range")
         TokenPacker.unpack_tokens(self.payload, self.token_count)
 

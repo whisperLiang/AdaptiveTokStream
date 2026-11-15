@@ -131,12 +131,7 @@ class PlaybackSession:
             return
         ready = self.valid_ready(index)
         if ready is None:
-            if self.stall_start is None:
-                self.stall_start = due
-                self.stall_count += 1
-                self.deadline_misses.add(index)
-                self.emit("BLOCK_DEADLINE_EXPIRED", due, block=index)
-                self.emit("BUFFER_UNDERRUN", due, block=index)
+            self.record_underrun(index, due)
             return
         stall = 0.0
         if self.stall_start is not None:
@@ -171,6 +166,14 @@ class PlaybackSession:
         if g == 3 or self.next_index == self.asset.block_count:
             # Final partial window may have unused groups; release it when stream ends.
             self.buffer.clear_window(w, g + 1)
+
+    def record_underrun(self, index, due):
+        if self.stall_start is None:
+            self.stall_start = due
+            self.stall_count += 1
+            self.deadline_misses.add(index)
+            self.emit("BLOCK_DEADLINE_EXPIRED", due, block=index)
+            self.emit("BUFFER_UNDERRUN", due, block=index)
 
     def next_wakeup(self, now):
         if self.next_index >= self.asset.block_count:

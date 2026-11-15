@@ -54,13 +54,7 @@ def evaluate_playback(asset_path, log_path, output_dir, backend, save_video=True
         )
     summary = {
         **log.get("summary", {}),
-        **{
-            f"average_{m}": float(np.mean([r[m] for r in rows]))
-            for m in ["psnr", "lpips", "dists", "mse"]
-        },
-        "quality_variation_psnr": float(np.mean(np.abs(np.diff([r["psnr"] for r in rows]))))
-        if len(rows) > 1
-        else 0,
+        **aggregate_quality(rows),
         "quality_source": "actual native decoder replay with displayed historical masks",
         "evaluation_replay_seconds": sum(r["replay_decode_ms"] for r in rows) / 1000,
     }
@@ -98,16 +92,20 @@ def evaluate_reconstruction(asset_path, video_path, log_path, output_dir, device
         rows.append({**record, **metrics.evaluate(source.frames[begin:end], pixels[begin:end])})
     summary = {
         **log["summary"],
-        **{
-            f"average_{m}": float(np.mean([r[m] for r in rows]))
-            for m in ["psnr", "lpips", "dists", "mse"]
-        },
+        **aggregate_quality(rows),
         "quality_source": "actual receiver FFV1 file after TCP transport",
-        "quality_variation_psnr": float(np.mean(np.abs(np.diff([r["psnr"] for r in rows]))))
-        if len(rows) > 1
-        else 0,
     }
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "evaluation.json").write_text(json.dumps({"summary": summary, "blocks": rows}, indent=2))
     return summary
+
+
+def aggregate_quality(rows):
+    means = {
+        f"average_{metric}": float(np.mean([r[metric] for r in rows]))
+        for metric in ["psnr", "lpips", "dists", "mse"]
+    }
+    psnr = [r["psnr"] for r in rows]
+    means["quality_variation_psnr"] = float(np.mean(np.abs(np.diff(psnr)))) if len(rows) > 1 else 0
+    return means

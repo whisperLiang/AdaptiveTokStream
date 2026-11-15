@@ -69,6 +69,7 @@ def test_two_process_real_model_socket_video(tmp_path):
                     "--output",
                     str(tmp_path / "sender"),
                 ],
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=45,

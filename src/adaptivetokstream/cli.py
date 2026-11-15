@@ -30,42 +30,11 @@ def parser():
         cmd.add_argument("--seed", type=int)
         cmd.add_argument("--weights")
         cmd.add_argument("--device")
-        if name == "prepare-video":
-            cmd.add_argument("--input", required=True)
-            cmd.add_argument("--frames", type=int)
-            cmd.add_argument("--fps", type=float)
-        if name == "encode-video":
-            cmd.add_argument("--prepared", required=True)
-        if name in (
-            "profile-codec",
-            "simulate",
-            "run-sender",
-            "evaluate",
-            "experiments",
-            "socket-demo",
-        ):
-            cmd.add_argument("--asset", required=True)
-        if name in ("simulate", "run-sender", "experiments", "socket-demo"):
-            cmd.add_argument("--rd", required=True)
-        if name in ("simulate", "run-sender", "experiments", "socket-demo"):
-            cmd.add_argument("--trace")
-            cmd.add_argument("--bandwidth-mbps", type=float)
-            cmd.add_argument("--policy", choices=["fixed", "greedy", "deadline_mpc"])
-            cmd.add_argument("--token-budget", type=int, choices=[8, 16, 32, 64, 128, 256])
-            cmd.add_argument("--byte-cap", type=int)
-        if name == "simulate":
-            cmd.add_argument("--decode-scale", type=float, default=1)
-        if name == "evaluate":
-            cmd.add_argument("--log", required=True)
-        if name in ("run-sender", "run-receiver"):
-            cmd.add_argument("--host", default="127.0.0.1")
-            cmd.add_argument("--port", type=int, default=8765)
-        if name == "run-receiver":
-            cmd.add_argument("--ready-file")
+        command_arguments(cmd, name)
     return p
 
 
-def execute(args):
+def configuration(args):
     cfg = load_config(args.config)
     for arg, obj, key in [
         ("seed", cfg, "seed"),
@@ -79,8 +48,14 @@ def execute(args):
     ]:
         value = getattr(args, arg, None)
         if value is not None:
+            if arg in ("weights", "trace"):
+                value = str(Path(value).resolve())
             setattr(obj, key, value)
-    cfg.validate()
+    return cfg.validate()
+
+
+def execute(args):
+    cfg = configuration(args)
     import random
 
     import numpy as np
@@ -89,25 +64,13 @@ def execute(args):
     np.random.seed(cfg.seed)
     Path(args.output).mkdir(parents=True, exist_ok=True)
     (Path(args.output) / "effective_config.json").write_text(json.dumps(cfg.to_dict(), indent=2))
+    return dispatch(args, cfg)
+
+
+def dispatch(args, cfg):
     cmd = args.command
-    if cmd == "prepare-video":
-        from .media import prepare_video
-
-        result = prepare_video(args.input, args.output, args.frames, args.fps)
-        return {key: result[key] for key in ["frame_count", "fps", "resolution"]}
-    if cmd == "encode-video":
-        from .asset import encode_video
-
-        a = encode_video(args.prepared, args.output, cfg.backend())
-        return {"windows": len(a.tokens), "encode_time_ms": a.metadata["encode_time_ms"]}
-    if cmd == "profile-codec":
-        from .profiling import profile_codec
-
-        r = profile_codec(args.asset, args.output, cfg.backend(), cfg)
-        return {
-            key: r[key]
-            for key in ["precompute_seconds", "metadata_storage_bytes", "peak_memory_bytes"]
-        }
+    if cmd in ("prepare-video", "encode-video", "profile-codec"):
+        return offline_command(args, cfg)
     if cmd == "simulate":
         from .asset import VideoAsset
         from .scheduler import RDTable
@@ -151,6 +114,68 @@ def main():
         print(f"AdaptiveTokStream: {error}", file=sys.stderr)
         raise SystemExit(2) from error
     print(json.dumps(result, indent=2, allow_nan=False))
+
+
+def command_arguments(cmd, name):
+    if name == "prepare-video":
+        cmd.add_argument("--input", required=True)
+        cmd.add_argument("--frames", type=int)
+        cmd.add_argument("--fps", type=float)
+    if name == "encode-video":
+        cmd.add_argument("--prepared", required=True)
+    if name in (
+        "profile-codec",
+        "simulate",
+        "run-sender",
+        "evaluate",
+        "experiments",
+        "socket-demo",
+    ):
+        cmd.add_argument("--asset", required=True)
+    if name in ("simulate", "run-sender", "experiments", "socket-demo"):
+        cmd.add_argument("--rd", required=True)
+    if name in ("simulate", "run-sender", "experiments", "socket-demo"):
+        cmd.add_argument("--trace")
+        cmd.add_argument("--bandwidth-mbps", type=float)
+        cmd.add_argument("--policy", choices=["fixed", "greedy", "deadline_mpc"])
+        cmd.add_argument("--token-budget", type=int, choices=[8, 16, 32, 64, 128, 256])
+        cmd.add_argument("--byte-cap", type=int)
+    endpoint_arguments(cmd, name)
+
+
+def endpoint_arguments(cmd, name):
+    if name == "simulate":
+        cmd.add_argument("--decode-scale", type=float, default=1)
+    if name == "evaluate":
+        cmd.add_argument("--log", required=True)
+    if name in ("run-sender", "run-receiver"):
+        cmd.add_argument("--host", default="127.0.0.1")
+        cmd.add_argument("--port", type=int, default=8765)
+    if name == "run-receiver":
+        cmd.add_argument("--ready-file")
+
+
+def offline_command(args, cfg):
+    cmd = args.command
+    if cmd == "prepare-video":
+        from .media import prepare_video
+
+        result = prepare_video(args.input, args.output, args.frames, args.fps)
+        return {key: result[key] for key in ["frame_count", "fps", "resolution"]}
+    if cmd == "encode-video":
+        from .asset import encode_video
+
+        a = encode_video(args.prepared, args.output, cfg.backend())
+        return {"windows": len(a.tokens), "encode_time_ms": a.metadata["encode_time_ms"]}
+    if cmd == "profile-codec":
+        from .profiling import profile_codec
+
+        r = profile_codec(args.asset, args.output, cfg.backend(), cfg)
+        return {
+            key: r[key]
+            for key in ["precompute_seconds", "metadata_storage_bytes", "peak_memory_bytes"]
+        }
+    raise ValueError(f"Unknown offline command: {cmd}")
 
 
 if __name__ == "__main__":

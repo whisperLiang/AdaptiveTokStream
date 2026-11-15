@@ -62,22 +62,7 @@ def prepare_video(input_path, output_dir, limit_frames=None, fps_override=None):
         fps = Fraction(str(fps_override)) if fps_override else stream.average_rate
         if fps is None or fps <= 0:
             raise ValueError("Video FPS unavailable; specify --fps")
-        for f in container.decode(stream):
-            if f.pts is None:
-                raise ValueError("Input frame missing PTS")
-            pts.append(round(float(f.pts * f.time_base) * 1_000_000))
-            # Match upstream evaluation: resize shortest edge then center crop.
-            scale = 128 / min(f.width, f.height)
-            arr = f.reformat(
-                width=max(128, round(f.width * scale)),
-                height=max(128, round(f.height * scale)),
-                format="rgb24",
-            ).to_ndarray()
-            top = (arr.shape[0] - 128) // 2
-            left = (arr.shape[1] - 128) // 2
-            frames.append(arr[top : top + 128, left : left + 128].copy())
-            if limit_frames and len(frames) >= limit_frames:
-                break
+        frames, pts = _read_frames(container, stream, limit_frames)
     if not frames or np.any(np.diff(pts) <= 0):
         raise ValueError("Video is empty or has non-increasing timestamps")
     original_pts = pts.copy()
@@ -115,3 +100,24 @@ def to_uint8(frames):
         .round()
         .astype(np.uint8)
     )
+
+
+def _read_frames(container, stream, limit_frames):
+    frames, pts = [], []
+    for f in container.decode(stream):
+        if f.pts is None:
+            raise ValueError("Input frame missing PTS")
+        pts.append(round(float(f.pts * f.time_base) * 1_000_000))
+        # Match upstream evaluation: resize shortest edge then center crop.
+        scale = 128 / min(f.width, f.height)
+        arr = f.reformat(
+            width=max(128, round(f.width * scale)),
+            height=max(128, round(f.height * scale)),
+            format="rgb24",
+        ).to_ndarray()
+        top = (arr.shape[0] - 128) // 2
+        left = (arr.shape[1] - 128) // 2
+        frames.append(arr[top : top + 128, left : left + 128].copy())
+        if limit_frames and len(frames) >= limit_frames:
+            break
+    return frames, pts

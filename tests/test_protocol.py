@@ -85,3 +85,44 @@ def test_packet_rejects_invalid_header(field, value):
 
     with pytest.raises(ValueError):
         dataclasses.replace(packet(), **{field: value}).serialize()
+
+
+@pytest.mark.parametrize(
+    "field,limit",
+    [("stream_id", 2**32), ("window_id", 2**32), ("frame_pts", 2**64), ("deadline", 2**64)],
+)
+def test_header_integer_boundaries(field, limit):
+    from dataclasses import replace
+
+    p = replace(packet(), **{field: limit - 1})
+    assert TokenPacket.deserialize(p.serialize()) == p
+    for value in [limit, limit + 1, -1, True, 1.5]:
+        with pytest.raises(ValueError):
+            replace(packet(), **{field: value}).validate()
+
+
+@pytest.mark.parametrize("start,count", [(0, 1), (0, 256), (255, 1), (8, 248)])
+def test_complete_legal_range_boundaries(start, count):
+    from dataclasses import replace
+
+    p = replace(packet([1] * count), token_start=start)
+    assert TokenPacket.deserialize(p.serialize()) == p
+
+
+@pytest.mark.parametrize("start,count", [(0, 0), (0, 257), (256, 0), (8, 249), (-1, 8), (255, 2)])
+def test_invalid_token_range_boundaries(start, count):
+    from dataclasses import replace
+
+    with pytest.raises(ValueError):
+        replace(packet(), token_start=start, token_count=count).validate()
+
+
+def test_reject_noninteger_unpack_count():
+    with pytest.raises(ValueError):
+        TokenPacker.unpack_tokens(b"\x00\x00", 1.0)
+
+
+def test_truncated_header_before_unpack():
+    for size in [0, 1, HEADER_SIZE - 1]:
+        with pytest.raises(ValueError):
+            TokenPacket.deserialize(b"\x00" * size)

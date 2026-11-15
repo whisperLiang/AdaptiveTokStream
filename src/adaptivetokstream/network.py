@@ -17,15 +17,17 @@ class BandwidthTrace:
             raise ValueError("Trace requires at least two matched samples")
         if any(not math.isfinite(x) for x in list(times) + list(mbps)):
             raise ValueError("Trace contains non-finite values")
-        if (
-            any(a >= b for a, b in itertools.pairwise(times))
-            or any(b < 0 for b in mbps)
-            or max(mbps[1:]) == 0
-        ):
-            raise ValueError("Trace timestamps must increase and carry positive capacity")
+        if any(a >= b for a, b in itertools.pairwise(times)):
+            raise ValueError("Trace timestamps must increase")
+        self._validate_capacity(mbps)
         self.times = list(times)
         self.mbps = list(mbps)
         self.period = times[-1] - times[0]
+
+    @staticmethod
+    def _validate_capacity(mbps):
+        if any(b < 0 for b in mbps) or max(mbps[1:]) == 0:
+            raise ValueError("Trace timestamps must increase and carry positive capacity")
 
     @classmethod
     def constant(cls, mbps):
@@ -34,12 +36,15 @@ class BandwidthTrace:
     @classmethod
     def from_swift(cls, path, swift_path):
         path = Path(path).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"Network trace missing: {path}")
         module_path = Path(swift_path) / "streamer/common.py"
         spec = importlib.util.spec_from_file_location("_adaptivetok_swift_common", module_path)
         if spec is None or spec.loader is None:
             raise FileNotFoundError(module_path)
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        # Execute the pinned original source without leaving bytecode in its checkout.
+        exec(compile(module_path.read_bytes(), str(module_path), "exec"), module.__dict__)
         # The upstream loader only accepts directories. A temporary symlink selects
         # one original trace without copying or rewriting its samples/timestamps.
         with tempfile.TemporaryDirectory(prefix="adaptivetok-trace-") as folder:
