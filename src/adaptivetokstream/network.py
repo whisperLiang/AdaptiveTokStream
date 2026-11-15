@@ -43,8 +43,7 @@ class BandwidthTrace:
         if spec is None or spec.loader is None:
             raise FileNotFoundError(module_path)
         module = importlib.util.module_from_spec(spec)
-        # Execute the pinned original source without leaving bytecode in its checkout.
-        exec(compile(module_path.read_bytes(), str(module_path), "exec"), module.__dict__)
+        spec.loader.exec_module(module)
         # The upstream loader only accepts directories. A temporary symlink selects
         # one original trace without copying or rewriting its samples/timestamps.
         with tempfile.TemporaryDirectory(prefix="adaptivetok-trace-") as folder:

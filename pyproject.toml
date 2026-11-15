@@ -32,4 +32,8 @@ pytest_add_cli_args_test_selection = ["tests/test_protocol.py"]
 pytest_add_cli_args = ["-q"]
 
 [tool.coverage.run]
+source = ["adaptivetokstream"]
 patch = ["subprocess"]
+
+[tool.coverage.report]
+include = ["*/src/adaptivetokstream/*"]

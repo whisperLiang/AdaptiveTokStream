@@ -112,6 +112,7 @@ class PlaybackSession:
         self.active_job = None
         self.decoder_ms.append(elapsed_ms)
         self.peak_memory_bytes = max(self.peak_memory_bytes, peak_memory_bytes)
+        self.check_decode_deadline(job.index, now)
         self.emit(
             "DECODE_COMPLETED", now, block=job.index, prefix=job.prefix, elapsed_ms=elapsed_ms
         )
@@ -120,6 +121,11 @@ class PlaybackSession:
         sig = self.signature(job.index)
         if sig[:-1] == job.signature[:-1]:
             self.ready[job.index] = ReadyBlock(job.prefix, job.signature, frames)
+
+    def check_decode_deadline(self, index, now):
+        if index == self.next_index and now > self.deadline(index) + 1e-9:
+            if self.valid_ready(index) is None:
+                self.record_underrun(index, self.deadline(index))
 
     def advance(self, now):
         """Freeze only completed, causally valid reconstructions at their PTS."""

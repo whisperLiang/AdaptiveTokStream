@@ -114,7 +114,7 @@ def test_invalid_token_range_boundaries(start, count):
     from dataclasses import replace
 
     with pytest.raises(ValueError):
-        replace(packet(), token_start=start, token_count=count).validate()
+        replace(packet([0] * max(1, count)), token_start=start, token_count=count).validate()
 
 
 def test_reject_noninteger_unpack_count():

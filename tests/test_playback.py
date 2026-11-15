@@ -58,3 +58,15 @@ def test_expired_enhancement_keeps_base(tmp_path):
     s.append(a.packet(0, 0, 8), 0)
     assert s.append(a.packet(0, 8, 16, deadline_us=1000), 0.002).status == "expired"
     assert s.buffer.prefix(0, 0) == 8
+
+
+def test_late_decode_completion_records_miss_without_prior_timer_wakeup(tmp_path):
+    a = asset(tmp_path)
+    s = PlaybackSession(a, initial_buffer=0.1, required_prefix=8)
+    s.append(a.packet(0, 0, 8), 0)
+    job = s.begin_decode(0)
+    # The OS may resume the receiver after its timer deadline has already passed.
+    s.complete_decode(job, 0.4, elapsed_ms=400)
+    s.advance(0.4)
+    assert s.played[0]["stall_seconds"] == pytest.approx(0.3)
+    assert s.stall_count == 1 and 0 in s.deadline_misses
