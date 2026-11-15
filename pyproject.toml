@@ -27,6 +27,9 @@ markers = ["model: requires official AdapTok weights and CUDA", "socket: starts 
 line-length = 100
 
 [tool.mutmut]
-paths_to_mutate = ["src/adaptivetokstream/protocol.py"]
-tests_dir = ["tests/"]
-pytest_add_cli_args = ["-q", "tests/test_protocol.py"]
+source_paths = ["src/adaptivetokstream/protocol.py"]
+pytest_add_cli_args_test_selection = ["tests/test_protocol.py"]
+pytest_add_cli_args = ["-q"]
+
+[tool.coverage.run]
+patch = ["subprocess"]

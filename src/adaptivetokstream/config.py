@@ -1,27 +1,29 @@
 """One validated configuration shared by offline, simulated and TCP execution."""
-from dataclasses import dataclass, field, asdict
+
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
 import yaml
 
 
 @dataclass
 class CodecConfig:
-    upstream_path: str = 'third_party/AdapTok'
-    weights: str = 'artifacts/weights/AdapTok'
-    device: str = 'cuda:0'
+    upstream_path: str = "third_party/AdapTok"
+    weights: str = "artifacts/weights/AdapTok"
+    device: str = "cuda:0"
     native_tokens_per_block: int = 256
     resolution: int = 128
     frames_per_window: int = 16
     frames_per_block: int = 4
     tokens_per_block: int = 256
     codebook_size: int = 8192
-    budgets: tuple = (8,16,32,64,128,256)
+    budgets: tuple = (8, 16, 32, 64, 128, 256)
 
 
 @dataclass
 class StreamingConfig:
-    mode: str = 'vod'
-    policy: str = 'deadline_mpc'
+    mode: str = "vod"
+    policy: str = "deadline_mpc"
     fixed_tokens: int = 64
     initial_buffer_seconds: float = 1.0
     max_buffer_seconds: float = 5.0
@@ -30,7 +32,7 @@ class StreamingConfig:
 
 @dataclass
 class NetworkConfig:
-    swift_path: str = 'third_party/swift'
+    swift_path: str = "third_party/swift"
     trace_path: str | None = None
     bandwidth_mbps: float = 1.0
     initial_estimate_mbps: float = 1.0
@@ -53,7 +55,7 @@ class SchedulerConfig:
 
 @dataclass
 class EvaluationConfig:
-    metrics: tuple = ('psnr','lpips','dists')
+    metrics: tuple = ("psnr", "lpips", "dists")
     save_reconstructions: bool = True
     save_packet_logs: bool = True
     save_playback_logs: bool = True
@@ -73,34 +75,62 @@ class Config:
 
     def validate(self):
         c = self.codec
-        if (c.resolution,c.frames_per_window,c.frames_per_block,c.tokens_per_block,c.codebook_size) != (128,16,4,256,8192):
-            raise ValueError('Only native 128x128, 16-frame windows, four groups, 256 stream IDs/group and 8192 entries are supported')
-        if tuple(c.budgets)!=(8,16,32,64,128,256):
-            raise ValueError('Budgets must be [8,16,32,64,128,256]')
-        if self.streaming.mode!='vod' or self.streaming.min_tokens!=8:
-            raise ValueError('Only pre-encoded VOD with 8-token base is supported')
-        if self.streaming.policy not in ('fixed','greedy','deadline_mpc') or self.streaming.fixed_tokens not in c.budgets:
-            raise ValueError('Unknown policy or fixed budget')
+        if (
+            c.resolution,
+            c.frames_per_window,
+            c.frames_per_block,
+            c.tokens_per_block,
+            c.codebook_size,
+        ) != (128, 16, 4, 256, 8192):
+            raise ValueError(
+                "Only native 128x128, 16-frame windows, four groups, 256 stream IDs/group and 8192 entries are supported"
+            )
+        if tuple(c.budgets) != (8, 16, 32, 64, 128, 256):
+            raise ValueError("Budgets must be [8,16,32,64,128,256]")
+        if self.streaming.mode != "vod" or self.streaming.min_tokens != 8:
+            raise ValueError("Only pre-encoded VOD with 8-token base is supported")
+        if (
+            self.streaming.policy not in ("fixed", "greedy", "deadline_mpc")
+            or self.streaming.fixed_tokens not in c.budgets
+        ):
+            raise ValueError("Unknown policy or fixed budget")
         if not 0 <= self.streaming.initial_buffer_seconds <= self.streaming.max_buffer_seconds:
-            raise ValueError('Invalid playback buffer limits')
-        if self.streaming.max_buffer_seconds<=0 or self.network.bandwidth_mbps<=0 or self.network.initial_estimate_mbps<=0:
-            raise ValueError('Positive buffer and bandwidth required')
-        if self.network.rtt_ms<0 or self.network.jitter_ms<0 or not 0<self.network.ewma_alpha<=1:
-            raise ValueError('Invalid network timing or estimator alpha')
-        if self.scheduler.horizon_blocks<1 or self.scheduler.beam_width<1:
-            raise ValueError('Positive MPC horizon and beam width required')
-        if self.scheduler.max_video_bytes is not None and self.scheduler.max_video_bytes<1:
-            raise ValueError('Byte cap must be positive')
-        if self.evaluation.repeats<1 or self.evaluation.warmup<0 or self.evaluation.history_budget not in c.budgets:
-            raise ValueError('Invalid profiling settings')
-        if tuple(self.evaluation.metrics)!=('psnr','lpips','dists'):
-            raise ValueError('All three reference metrics are required')
+            raise ValueError("Invalid playback buffer limits")
+        if (
+            self.streaming.max_buffer_seconds <= 0
+            or self.network.bandwidth_mbps <= 0
+            or self.network.initial_estimate_mbps <= 0
+        ):
+            raise ValueError("Positive buffer and bandwidth required")
+        if (
+            self.network.rtt_ms < 0
+            or self.network.jitter_ms < 0
+            or not 0 < self.network.ewma_alpha <= 1
+        ):
+            raise ValueError("Invalid network timing or estimator alpha")
+        if self.scheduler.horizon_blocks < 1 or self.scheduler.beam_width < 1:
+            raise ValueError("Positive MPC horizon and beam width required")
+        if self.scheduler.max_video_bytes is not None and self.scheduler.max_video_bytes < 1:
+            raise ValueError("Byte cap must be positive")
+        if (
+            self.evaluation.repeats < 1
+            or self.evaluation.warmup < 0
+            or self.evaluation.history_budget not in c.budgets
+        ):
+            raise ValueError("Invalid profiling settings")
+        if tuple(self.evaluation.metrics) != ("psnr", "lpips", "dists"):
+            raise ValueError("All three reference metrics are required")
         return self
 
     def backend(self):
         from .codec import AdapTokBackend
-        return AdapTokBackend(self.codec.upstream_path,self.codec.weights,self.codec.device,
-                              self.codec.native_tokens_per_block)
+
+        return AdapTokBackend(
+            self.codec.upstream_path,
+            self.codec.weights,
+            self.codec.device,
+            self.codec.native_tokens_per_block,
+        )
 
     def to_dict(self):
         return asdict(self)
@@ -109,14 +139,26 @@ class Config:
 def load_config(path):
     path = Path(path).resolve()
     raw = yaml.safe_load(path.read_text()) or {}
-    classes = {'codec':CodecConfig,'streaming':StreamingConfig,'network':NetworkConfig,
-               'scheduler':SchedulerConfig,'evaluation':EvaluationConfig}
-    unknown=set(raw)-set(classes)-{'seed'}
+    classes = {
+        "codec": CodecConfig,
+        "streaming": StreamingConfig,
+        "network": NetworkConfig,
+        "scheduler": SchedulerConfig,
+        "evaluation": EvaluationConfig,
+    }
+    unknown = set(raw) - set(classes) - {"seed"}
     if unknown:
-        raise ValueError(f'Unknown configuration sections: {sorted(unknown)}')
-    cfg=Config(**{key: cls(**raw.get(key,{})) for key,cls in classes.items()},seed=raw.get('seed',42))
-    for obj,key in [(cfg.codec,'upstream_path'),(cfg.codec,'weights'),(cfg.network,'swift_path'),(cfg.network,'trace_path')]:
-        value=getattr(obj,key)
+        raise ValueError(f"Unknown configuration sections: {sorted(unknown)}")
+    cfg = Config(
+        **{key: cls(**raw.get(key, {})) for key, cls in classes.items()}, seed=raw.get("seed", 42)
+    )
+    for obj, key in [
+        (cfg.codec, "upstream_path"),
+        (cfg.codec, "weights"),
+        (cfg.network, "swift_path"),
+        (cfg.network, "trace_path"),
+    ]:
+        value = getattr(obj, key)
         if value is not None:
-            setattr(obj,key,str((path.parent/value).resolve()))
+            setattr(obj, key, str((path.parent / value).resolve()))
     return cfg.validate()
