@@ -1,0 +1,42 @@
+# Official public checkpoint: 2048 native IDs, 512/group. Only first 256/group are transmitted.
+# Exact 1024 native model: supply its own weights and set native_tokens_per_block: 256.
+codec:
+  upstream_path: ../third_party/AdapTok
+  weights: ../artifacts/weights/AdapTok
+  device: cuda:0
+  native_tokens_per_block: 512
+  resolution: 128
+  frames_per_window: 16
+  frames_per_block: 4
+  tokens_per_block: 256
+  codebook_size: 8192
+  budgets: [8, 16, 32, 64, 128, 256]
+streaming:
+  mode: vod
+  policy: deadline_mpc
+  fixed_tokens: 64
+  min_tokens: 8
+  initial_buffer_seconds: 1.0
+  max_buffer_seconds: 5.0
+network:
+  swift_path: ../third_party/swift
+  trace_path: null
+  bandwidth_mbps: 1.0
+  initial_estimate_mbps: 1.0
+  rtt_ms: 20.0
+  jitter_ms: 0.0
+  ewma_alpha: 0.3
+scheduler:
+  horizon_blocks: 4
+  beam_width: 12
+  use_decode_cost: true
+  use_content_quality: true
+evaluation:
+  metrics: [psnr, lpips, dists]
+  warmup: 3
+  repeats: 5
+  history_budget: 256
+  save_reconstructions: true
+  save_packet_logs: true
+  save_playback_logs: true
+seed: 42
